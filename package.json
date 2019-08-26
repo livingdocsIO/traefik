@@ -1,0 +1,15 @@
+{
+  "name": "rancher-traefik-certificate-exporter",
+  "version": "1.0.2",
+  "main": "index.js",
+  "dependencies": {
+    "lodash": "^4.17.15",
+    "promise-mysql": "^3.3.1"
+  },
+  "devDependencies": {},
+  "scripts": {
+    "start": "node index.js"
+  },
+  "author": "Marc Bachmann <marc.brookman@gmail.com>",
+  "license": "MIT"
+}
