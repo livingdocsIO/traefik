@@ -68,6 +68,10 @@ defaultEntryPoints = ["http", "https"]
   address = ":443"
   compress = true
 
+    [entryPoints.https.tls]
+    minVersion = "VersionTLS12"
+    sniStrict = true
+
 ${certificates.map((certificate) => `
     [[entryPoints.https.tls.certificates]]
     # Created at ${certificate.created}
