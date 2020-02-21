@@ -3,10 +3,12 @@
   "version": "1.0.2",
   "main": "index.js",
   "dependencies": {
+    "axios": "^0.19.2",
+    "fs-extra": "^8.1.0",
     "lodash": "^4.17.15",
-    "promise-mysql": "^3.3.1"
+    "pino": "^5.16.0",
+    "pino-pretty": "^3.6.0"
   },
-  "devDependencies": {},
   "scripts": {
     "start": "node index.js"
   },

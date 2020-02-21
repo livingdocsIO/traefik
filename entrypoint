@@ -1,0 +1,16 @@
+#!/bin/bash
+if traefik "$1" --help >/dev/null 2>&1
+then
+  set -e
+  /usr/local/bin/node /app/index.js once
+  /usr/local/bin/node /app/index.js &
+  bash -c "exec /usr/local/bin/traefik $@" &
+  wait -n
+  kill $(jobs -p) 2>/dev/null || true
+  exit 1
+else
+  echo "= '$1' is not a Traefik command: assuming shell execution." 1>&2
+  exec "$@"
+fi
+
+

@@ -1,44 +1,27 @@
-# DroneCI Event Listener
+# Traefik
 
-A small service that queries a rancher v1 database for registered certificates and creates a traefik.toml configuration file with them.
+A small docker image with https://github.com/containous/traefik that includes a nodejs script that fetches certificates from a remote server.
 
-This allows us to use existing rancher certificates and expose use them traefik without using letsencrypt, which would regurarely hit a rate limit when there are a lot of servers.
-
+This allows us to use and manage existing certificates without any dependencies except s3 as storage.
+We're still running some databases outside of rancher/kubernetes and therefore we'll need the separate letsencrypt storage anyways.
 
 ```bash
-docker build -t marcbachmann/rancher-traefik-certificate-exporter:1.0.2 -f Dockerfile .
+docker build -t livingdocs/traefik:1 -f Dockerfile .
 ```
 
 ## Setup
 
-Example docker compose that you can use in rancher:
 ```bash
-version: '2'
-services:
-  loadbalancer:
-    image: traefik
-    volumes_from:
-    - config
-    ports:
-    - 80:80/tcp
-    - 443:443/tcp
-    working_dir: /traefik-config
-    command:
-    - --configFile=/traefik-config/traefik.toml
-    - --rancher.enableServiceHealthFilter=true
-    - --rancher.exposedByDefault=false
-    labels:
-      io.rancher.sidekicks: config
-      io.rancher.scheduler.affinity:host_label: traefik_lb=true
-      io.rancher.service.external_dns_name_template: \052.%{{environment_name}}
-      io.rancher.scheduler.global: 'true'
-      prometheus.port: '8000'
-      prometheus.job_name: traefik
-  config:
-    image: marcbachmann/rancher-traefik-certificate-exporter
-    environment:
-      MYSQL_CONNECTION_URL: mysql://username:pass@host/rancher
-      DESTINATION_FILE: /traefik-config/traefik.toml
-    volumes:
-    - traefik-config:/traefik-config
+# First start a letsencrypt service that pushes certificates to S3
+# See https://github.com/livingdocsIO/docker/tree/master/letsencrypt
+
+# then run this with a token generated in the letsencrypt service
+docker run \
+  -e DESTINATION_FILE=/etc/traefik.toml \
+  -e CERTIFICATE_URL=https://certificates.example.com \
+  -e CERTIFICATE_URL_TOKEN=someJsonWebTokenOrBearerToken
+  livingdocs/traefik:1 \
+    --configFile=/etc/traefik.toml \
+    --rancher.enableServiceHealthFilter=true \
+    --rancher.exposedByDefault=false
 ```

@@ -1,59 +1,72 @@
 const path = require('path')
 const _template = require('lodash/template')
-const mysql = require('promise-mysql')
-const writeFile = require('util').promisify(require('fs').writeFile)
-const connectionUrl = process.env.MYSQL_CONNECTION_URL
+const axios = require('axios')
+const fs = require('fs-extra')
+const certificateUrl = process.env.CERTIFICATE_URL
+const authenticationToken = process.env.CERTIFICATE_URL_TOKEN
 const destinationFile = path.resolve(process.env.DESTINATION_FILE || './traefik.toml')
 
-const certPlaceholder = '.certificate.<%= uuid %>.<%= type %>'
-const certFileTemplate = _template(destinationFile.replace('.toml', certPlaceholder))
-const certFileNameTemplate = _template(path.basename(destinationFile).replace('.toml', certPlaceholder))
+const prettyPrint = process.env.NODE_ENV === 'production' ? null : {levelFirst: true}
+const log = require('pino')({level: process.env.LOGLEVEL || 'info', prettyPrint})
 
-if (!/.toml$/.test(destinationFile)) throw new Error('The variable DESTINATION_FILE must provide to a .toml file.')
-if (!connectionUrl) throw new Error('The variable MYSQL_CONNECTION_URL must provide mysql connection url.')
+// eslint-disable-next-line
+if (!/\.toml$/.test(destinationFile)) throw new Error('The variable DESTINATION_FILE must provide to a .toml file.')
+if (!certificateUrl) throw new Error('The variable CERTIFICATE_URL must provide an http endpoint.')
+if (!authenticationToken) throw new Error('The variable CERTIFICATE_URL_TOKEN must provide a bearer token.')
 
-const delay = t => new Promise(resolve => setTimeout(resolve, t))
-const DEBUG = process.env.DEBUG === 'true'
+// eslint-disable-next-line
+const certPlaceholder = destinationFile.replace(/\.toml$/, `_certificates/<%- domain.replace('*', '_') %>.<%= type %>`)
+const certFileNameTemplate = _template(certPlaceholder)
+
+const delay = (t) => new Promise(resolve => setTimeout(resolve, t))
+let retryCount = process.argv.slice(2).includes('once') ? 1 : Infinity
 
 async function start () {
-  const connection = await mysql.createConnection(connectionUrl)
-
   let previousCerts = ''
-  async function refresh () {
-    const certificates = await connection.query(`
-      SELECT name, uuid, created, cert_chain as chain, cert, \`key\`
-      FROM certificate
-      WHERE state = "active"
-      ORDER BY name;
-    `)
-
-    const stringifiedCerts = JSON.stringify(certificates)
-
-    const file = template({certificates})
-    if (previousCerts === stringifiedCerts) {
-      if (DEBUG) console.log('Certificate did not change')
-      return delay(1000 * 60).then(refresh)
-    }
-
+  while (retryCount--) {
     try {
-      for (const cert of certificates) {
-        await writeFile(certFileTemplate({...cert, type: 'cert'}), cert.cert, 'utf8')
-        await writeFile(certFileTemplate({...cert, type: 'key'}), cert.key, 'utf8')
+      const {data: certificates} = await axios({
+        method: 'GET',
+        url: certificateUrl,
+        headers: {Authorization: `Bearer ${authenticationToken}`},
+        validateStatus (status) { return status === 200 }
+      })
+
+      const stringifiedCerts = JSON.stringify(certificates)
+      const file = template({certificates})
+
+      if (previousCerts === stringifiedCerts) {
+        log.debug('Certificate did not change')
+      } else {
+        try {
+          for (const cert of certificates) {
+            await fs.outputFile(certFileNameTemplate({...cert, type: 'cert'}), cert.cert, 'utf8')
+            await fs.outputFile(certFileNameTemplate({...cert, type: 'key'}), cert.key, 'utf8')
+          }
+          await fs.outputFile(destinationFile, file.traefik, 'utf8')
+          previousCerts = stringifiedCerts
+        } catch (error) {
+          log.error({error}, 'Failed to write config with certificates')
+        }
+
+        log.debug('Certificate changed')
       }
-      await writeFile(destinationFile, file.traefik, 'utf8')
-      previousCerts = stringifiedCerts
-    } catch (err) {
-      console.error('Failed to write config with certificates', err)
+    } catch (error) {
+      log.error({error}, 'Certificate fetch failed')
     }
 
-    console.log('Certificate changed')
-    return delay(1000 * 60).then(refresh)
+    if (retryCount) await delay(5000 * 60)
   }
-
-  return refresh()
 }
 
 function template ({certificates}) {
+  const useStrictSNI = ![false, 'false'].includes(process.env.STRICT_SNI)
+  const useHttpRedirect = ![false, 'false'].includes(process.env.HTTP_REDIRECT)
+  const httpRedirect = useHttpRedirect ? `
+    [entryPoints.http.redirect]
+    entryPoint = "https"
+  ` : ''
+
   return {
     traefik: `
 defaultEntryPoints = ["http", "https"]
@@ -61,8 +74,8 @@ defaultEntryPoints = ["http", "https"]
   [entryPoints.http]
   address = ":80"
   compress = true
-    [entryPoints.http.redirect]
-    entryPoint = "https"
+
+${httpRedirect}
 
   [entryPoints.https]
   address = ":443"
@@ -70,11 +83,11 @@ defaultEntryPoints = ["http", "https"]
 
     [entryPoints.https.tls]
     minVersion = "VersionTLS12"
-    sniStrict = true
+    sniStrict = ${useStrictSNI}
 
 ${certificates.map((certificate) => `
     [[entryPoints.https.tls.certificates]]
-    # Created at ${certificate.created}
+    # Domain ${certificate.domain}
     certFile = "${certFileNameTemplate({...certificate, type: 'cert'})}"
     keyFile = "${certFileNameTemplate({...certificate, type: 'key'})}"
 `).join('\n')}
@@ -91,7 +104,7 @@ watch = true
 }
 
 start({})
-  .catch((err) => {
-    console.error(err)
+  .catch((error) => {
+    log.fatal({error}, 'Fatal error')
     process.exit(1)
   })
