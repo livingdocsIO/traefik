@@ -62,6 +62,57 @@ async function start () {
   }
 }
 
+function templateV2 ({certificates}) {
+  return {
+    traefik: `
+      [global]
+        checkNewVersion = false
+        sendAnonymousUsage = false
+
+      [log]
+        level = "WARN"
+
+      ${['false', false].includes(process.env.TRAEFIK_ACCESS_LOGS) ? '' : '[accessLog]' }
+
+      [serversTransport]
+        maxIdleConnsPerHost = 200
+
+        [serversTransport.forwardingTimeouts]
+          dialTimeout = "5s"
+          idleConnTimeout = "20s"
+
+      [entryPoints]
+        [entryPoints.http]
+          address = ":80"
+
+        [entryPoints.https]
+          address = ":443"
+
+        [entryPoints.monitoring]
+          address = ":8080"
+
+    ${certificates.map((certificate) => `
+      # Domain ${certificate.domain}
+      [[tls.certificates]]
+        certFile = "${certFileNameTemplate({...certificate, type: 'cert'})}"
+        keyFile = "${certFileNameTemplate({...certificate, type: 'key'})}"
+    `).join('\n')}
+
+      [tls.options]
+        [tls.options.myTLSOptions]
+          minVersion = "VersionTLS12"
+
+      [providers.rancher]
+        watch = true
+        exposedByDefault = false
+        enableServiceHealthFilter = false
+
+      [metrics.prometheus]
+        buckets = [0.1,0.3,1.2,5.0]
+        entryPoint = "monitoring"
+    `.split('\n').map((l) => l.replace(/^ {,6}/, '')).join('\n')
+  }
+}
 
 function templateV1 ({certificates}) {
   const useStrictSNI = ![false, 'false'].includes(process.env.STRICT_SNI)
