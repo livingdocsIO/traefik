@@ -19,10 +19,13 @@ const certPlaceholder = destinationFile.replace(/\.toml$/, `_certificates/<%- do
 const certFileNameTemplate = _template(certPlaceholder)
 
 const delay = (t) => new Promise(resolve => setTimeout(resolve, t))
-let retryCount = process.argv.slice(2).includes('once') ? 1 : Infinity
+const runOnce = process.argv.slice(2).includes('once')
+let retryCount = runOnce ? 1 : Infinity
 
 async function start () {
   let previousCerts = ''
+  if (!runOnce) await delay(5000 * 60)
+
   while (retryCount--) {
     try {
       const {data: certificates} = await axios({
@@ -33,7 +36,7 @@ async function start () {
       })
 
       const stringifiedCerts = JSON.stringify(certificates)
-      const file = template({certificates})
+      const file = templateV1({certificates})
 
       if (previousCerts === stringifiedCerts) {
         log.debug('Certificate did not change')
@@ -59,7 +62,8 @@ async function start () {
   }
 }
 
-function template ({certificates}) {
+
+function templateV1 ({certificates}) {
   const useStrictSNI = ![false, 'false'].includes(process.env.STRICT_SNI)
   const useHttpRedirect = ![false, 'false'].includes(process.env.HTTP_REDIRECT)
   const httpRedirect = useHttpRedirect ? `
@@ -95,7 +99,7 @@ ${certificates.map((certificate) => `
 [file]
 watch = true
 
-[accessLog]
+${['false', false].includes(process.env.TRAEFIK_ACCESS_LOGS) ? '' : '[accessLog]' }
 [rancher]
 [rancher.metadata]
 [metrics.prometheus]
