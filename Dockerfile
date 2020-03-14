@@ -1,4 +1,4 @@
-FROM traefik:v1.7.19-alpine AS traefik
+FROM traefik:v1.7.21-alpine AS traefik
 
 FROM livingdocs/node:12.0
 RUN apk add --no-cache bash
