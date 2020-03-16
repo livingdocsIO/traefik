@@ -141,15 +141,30 @@ function templateV2 ({certificates}) {
         [entryPoints.http]
           address = ":80"
 
+          [entryPoints.http.transport]
+            [entryPoints.http.transport.lifeCycle]
+              requestAcceptGraceTimeout = "6s"
+              graceTimeOut = "3s"
+
 ${httpProxyProtocol}
 
         [entryPoints.https]
           address = ":443"
 
+          [entryPoints.https.transport]
+            [entryPoints.https.transport.lifeCycle]
+              requestAcceptGraceTimeout = "6s"
+              graceTimeOut = "3s"
+
 ${httpsProxyProtocol}
 
         [entryPoints.monitoring]
           address = ":8080"
+
+          [entryPoints.monitoring.transport]
+            [entryPoints.monitoring.transport.lifeCycle]
+              requestAcceptGraceTimeout = "6s"
+              graceTimeOut = "3s"
 
 ${monitoringProxyProtocol}
 
@@ -237,6 +252,10 @@ function templateV1 ({certificates}) {
 
       [ping]
         entryPoint = "http"
+
+      [lifeCycle]
+        requestAcceptGraceTimeout = "6s"
+        graceTimeOut = "3s"
 
       ${['false', false].includes(process.env.TRAEFIK_ACCESS_LOGS) ? '' : '[accessLog]' }
       [rancher]
