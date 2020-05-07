@@ -16,7 +16,8 @@ if (!authenticationToken) throw new Error('The variable CERTIFICATE_URL_TOKEN mu
 
 // eslint-disable-next-line
 const certPlaceholder = destinationFile.replace(/\.toml$/, `_certificates/<%- domain.replace('*', '_') %>.<%= type %>`)
-const certDeclarationFile = destinationFile.replace(/\.toml$/, `_certificates.toml`)
+const traefikDynamicDir = destinationFile.replace(/\.toml$/, `.d/`)
+const certDeclarationFile = `${traefikDynamicDir}/certificates.toml`
 const certFileNameTemplate = _template(certPlaceholder)
 
 const delay = (t) => new Promise(resolve => setTimeout(resolve, t))
@@ -25,6 +26,7 @@ let retryCount = runOnce ? 1 : Infinity
 
 const toTraefikConfig = process.env.TRAEFIK_VERSION.startsWith('v2') ? templateV2 : templateV1
 const useStrictSNI = ![false, 'false'].includes(process.env.STRICT_SNI)
+const accessLogsDisabled = ['false', false].includes(process.env.TRAEFIK_ACCESS_LOG) || ['false', false].includes(process.env.TRAEFIK_ACCESS_LOGS)
 
 async function start () {
   let previousCerts = ''
@@ -69,27 +71,26 @@ async function start () {
 }
 
 function templateV2 ({certificates}) {
+  const useHttpRedirect = ![false, 'false'].includes(process.env.HTTP_REDIRECT) ? `
+          [entryPoints.web.http.redirections]
+            [entryPoints.web.http.redirections.entryPoint]
+              to = "websecure"
+              scheme = "https"
+  ` : ''
+
   const trustedIps = (process.env.TRUSTED_IPS || '').split(/[;, ]/).filter(Boolean)
-  const httpProxyProtocol = !trustedIps.length ? '' : `
-          [entryPoints.http.proxyProtocol]
+  const webProxyProtocol = !trustedIps.length ? '' : `
+          [entryPoints.web.proxyProtocol]
             trustedIPs = ${JSON.stringify(trustedIps)}
 
-          [entryPoints.http.forwardedHeaders]
+          [entryPoints.web.forwardedHeaders]
             trustedIPs = ${JSON.stringify(trustedIps)}
   `
-  const httpsProxyProtocol = !trustedIps.length ? '' : `
-          [entryPoints.https.proxyProtocol]
+  const websecureProxyProtocol = !trustedIps.length ? '' : `
+          [entryPoints.websecure.proxyProtocol]
             trustedIPs = ${JSON.stringify(trustedIps)}
 
-          [entryPoints.https.forwardedHeaders]
-            trustedIPs = ${JSON.stringify(trustedIps)}
-  `
-
-  const monitoringProxyProtocol = !trustedIps.length ? '' : `
-          [entryPoints.monitoring.proxyProtocol]
-            trustedIPs = ${JSON.stringify(trustedIps)}
-
-          [entryPoints.monitoring.forwardedHeaders]
+          [entryPoints.websecure.forwardedHeaders]
             trustedIPs = ${JSON.stringify(trustedIps)}
   `
 
@@ -126,9 +127,20 @@ function templateV2 ({certificates}) {
         sendAnonymousUsage = false
 
       [log]
-        level = "WARN"
+        level = "${ process.env.DEBUG === 'true' ? 'DEBUG' : 'WARN' }"
 
-      ${['false', false].includes(process.env.TRAEFIK_ACCESS_LOGS) ? '' : '[accessLog]' }
+      ${accessLogsDisabled ? '' : '[accessLog]'}
+
+      [api]
+
+      [ping]
+        manualRouting = true
+
+      [metrics.prometheus]
+        buckets = [0.1,0.3,1.2,5.0]
+        addEntryPointsLabels = true
+        addServicesLabels = true
+        manualRouting = true
 
       [serversTransport]
         maxIdleConnsPerHost = 200
@@ -138,51 +150,37 @@ function templateV2 ({certificates}) {
           idleConnTimeout = "20s"
 
       [entryPoints]
-        [entryPoints.http]
+        [entryPoints.web]
           address = ":80"
 
-          [entryPoints.http.transport]
-            [entryPoints.http.transport.lifeCycle]
-              requestAcceptGraceTimeout = "6s"
-              graceTimeOut = "3s"
+${useHttpRedirect}
 
-${httpProxyProtocol}
+          [entryPoints.web.transport.lifeCycle]
+            requestAcceptGraceTimeout = "6s"
+            graceTimeOut = "3s"
 
-        [entryPoints.https]
+${webProxyProtocol}
+
+        [entryPoints.websecure]
           address = ":443"
 
-          [entryPoints.https.transport]
-            [entryPoints.https.transport.lifeCycle]
-              requestAcceptGraceTimeout = "6s"
-              graceTimeOut = "3s"
+          [entryPoints.websecure.http.tls]
 
-${httpsProxyProtocol}
+          [entryPoints.websecure.transport.lifeCycle]
+            requestAcceptGraceTimeout = "6s"
+            graceTimeOut = "3s"
 
-        [entryPoints.monitoring]
-          address = ":8080"
 
-          [entryPoints.monitoring.transport]
-            [entryPoints.monitoring.transport.lifeCycle]
-              requestAcceptGraceTimeout = "6s"
-              graceTimeOut = "3s"
-
-${monitoringProxyProtocol}
+${websecureProxyProtocol}
 
       [providers.file]
-        filename = "${certDeclarationFile}"
         watch = true
+        directory = "${traefikDynamicDir}"
 
       [providers.rancher]
         watch = true
         exposedByDefault = false
         enableServiceHealthFilter = false
-
-      [metrics.prometheus]
-        buckets = [0.1,0.3,1.2,5.0]
-        entryPoint = "monitoring"
-
-      [ping]
-        entryPoint = "http"
 
     `.split('\n').map((l) => l.replace(/^ {0,6}/, '')).join('\n')
   }
@@ -194,7 +192,6 @@ function templateV1 ({certificates}) {
     [entryPoints.http.redirect]
     entryPoint = "https"
   ` : ''
-
 
   const trustedIps = (process.env.TRUSTED_IPS || '').split(/[;, ]/).filter(Boolean)
   const httpProxyProtocol = !trustedIps.length ? '' : `
@@ -247,8 +244,8 @@ function templateV1 ({certificates}) {
             sniStrict = ${useStrictSNI}
 
       [file]
-        filename = "${certDeclarationFile}"
         watch = true
+        directory = "${traefikDynamicDir}"
 
       [ping]
         entryPoint = "http"
@@ -257,7 +254,7 @@ function templateV1 ({certificates}) {
         requestAcceptGraceTimeout = "6s"
         graceTimeOut = "3s"
 
-      ${['false', false].includes(process.env.TRAEFIK_ACCESS_LOGS) ? '' : '[accessLog]' }
+      ${accessLogsDisabled ? '' : '[accessLog]'}
       [rancher]
       [rancher.metadata]
       [metrics.prometheus]
