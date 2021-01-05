@@ -3,7 +3,7 @@
   "version": "1.0.2",
   "main": "index.js",
   "dependencies": {
-    "axios": "^0.19.2",
+    "axios": "^0.21.1",
     "fs-extra": "^8.1.0",
     "lodash": "^4.17.15",
     "pino": "^5.16.0",
